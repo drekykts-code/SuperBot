@@ -7,7 +7,7 @@ from flask import Flask
 from groq import Groq
 
 # ═══════════════════════════════════════════════════════
-# CONFIGURATION (Render Environment Variables)
+# CONFIGURATION
 # ═══════════════════════════════════════════════════════
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE") 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0")) 
@@ -29,8 +29,8 @@ except Exception:
     pass
 
 user_plan = {}
-admin_msg_map = {} # Forwarded message ID -> User Chat ID
-user_state = {}    # 'main', 'ai_chat', 'admin_chat'
+admin_msg_map = {} # Bot ka Message ID -> User Chat ID
+user_state = {}
 
 PLAN_NAMES = {
     "plan_100": "1 Month ($100)",
@@ -47,6 +47,18 @@ Keep answers short (max 2 sentences). Be helpful.
 """
 
 # ═══════════════════════════════════════════════════════
+# 🆕 ADMIN WARNING SYSTEM (Bina Reply kiye message bhejne par)
+# ═══════════════════════════════════════════════════════
+@bot.message_handler(func=lambda message: message.chat.id == ADMIN_ID and not message.reply_to_message, content_types=['text', 'photo'])
+def warn_admin_no_reply(message):
+    bot.reply_to(
+        message, 
+        "⚠️ <b>Bhai, aapne kisi message ko Reply (Swipe) nahi kiya!</b>\n\n"
+        "Agar aap key bhejna chahte hain, toh kripya us customer ke <b>Photo</b> ya <b>Alert Message</b> par <b>Right-Click / Swipe</b> karke <b>Reply</b> karein, aur phir <code>OK YOUR_KEY</code> type karein.",
+        parse_mode="HTML"
+    )
+
+# ═══════════════════════════════════════════════════════
 # ID CHECK COMMAND
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(commands=['id'])
@@ -55,7 +67,7 @@ def send_id(message):
     bot.reply_to(message, f"🆔 Aapki Telegram ID: <code>{chat_id}</code>\n\nMake sure Render ke Environment me <code>ADMIN_ID</code> me yahi number daala ho.", parse_mode="HTML")
 
 # ═══════════════════════════════════════════════════════
-# MENU BUILDERS
+# MENUS
 # ═══════════════════════════════════════════════════════
 def get_main_menu():
     markup = InlineKeyboardMarkup(row_width=1)
@@ -88,7 +100,7 @@ def get_admin_chat_menu():
     return markup
 
 # ═══════════════════════════════════════════════════════
-# START & MENU HANDLERS
+# HANDLERS
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -142,7 +154,7 @@ def handle_callback(call):
         user_state[chat_id] = 'ai_chat'
         bot.edit_message_text(
             chat_id=chat_id, message_id=call.message.message_id,
-            text="🤖 <b>AI Support Activated!</b>\n\nAap ab yahan apne sawal type karke poochh sakte hain. Main aapki puri madad karunga.",
+            text="🤖 <b>AI Support Activated!</b>\n\nAap ab yahan apne sawal type karke poochh sakte hain.",
             reply_markup=get_ai_menu(), parse_mode="HTML"
         )
 
@@ -150,7 +162,7 @@ def handle_callback(call):
         user_state[chat_id] = 'admin_chat'
         bot.edit_message_text(
             chat_id=chat_id, message_id=call.message.message_id,
-            text="📞 <b>Admin Chat Activated!</b>\n\nAap ab apna message type karke bhej sakte hain. Admin aapko yahan reply karenge.",
+            text="📞 <b>Admin Chat Activated!</b>\n\nAap ab apna message type karke bhej sakte hain.",
             reply_markup=get_admin_chat_menu(), parse_mode="HTML"
         )
 
@@ -182,61 +194,44 @@ def handle_callback(call):
         )
 
 # ═══════════════════════════════════════════════════════
-# USER MESSAGE HANDLER (Text, Photo, Doc)
+# USER MESSAGE HANDLER
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(func=lambda message: message.chat.id != ADMIN_ID, content_types=['text', 'photo', 'document'])
 def handle_user_messages(message):
     chat_id = message.chat.id
     state = user_state.get(chat_id, 'main')
 
-    # 1. Agar user Admin Chat me hai
     if state == 'admin_chat':
-        # Forward to Admin
         if ADMIN_ID != 0:
-            try:
-                forwarded = bot.forward_message(ADMIN_ID, chat_id, message.message_id)
-                admin_msg_map[forwarded.message_id] = chat_id
-                bot.reply_to(message, "✅ <b>Message sent to Admin!</b>\nAdmin jaldi reply karenge.", parse_mode="HTML")
-            except Exception as e:
-                bot.reply_to(message, "⚠️ Admin ko message nahi bhej paye. Thodi der baad try karein.")
+            forwarded = bot.forward_message(ADMIN_ID, chat_id, message.message_id)
+            admin_msg_map[forwarded.message_id] = chat_id
+            bot.reply_to(message, "✅ <b>Message sent to Admin!</b>", parse_mode="HTML")
         return
 
-    # 2. Agar user AI Chat me hai
     if state == 'ai_chat' and message.text:
-        if not ai_client or not GROQ_API_KEY:
-            bot.reply_to(message, "⚠️ AI service is down.")
-            return
-            
+        if not ai_client: return
         bot.send_chat_action(chat_id, 'typing')
         try:
             response = ai_client.chat.completions.create(
                 model="llama-3.1-8b-instant",
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": message.text}
-                ],
+                messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": message.text}],
                 temperature=0.5, max_tokens=150
             )
             bot.reply_to(message, response.choices[0].message.content, reply_markup=get_ai_menu())
-        except Exception as e:
-            print(f"AI Error: {e}")
+        except Exception:
             bot.reply_to(message, "⚠️ AI is busy. Please try again.")
         return
 
-    # 3. Agar user payment proof bhej raha hai (Plan selected)
     if message.content_type in ['photo', 'document'] and chat_id in user_plan:
         plan_name = user_plan[chat_id]
         username = message.from_user.username or "No Username"
-        
         bot.reply_to(message, "⏳ <b>Proof Received!</b>\n\nAdmin verify kar raha hai.", parse_mode="HTML")
         
         if ADMIN_ID != 0:
             alert_text = (
                 f"🚨 <b>NEW PAYMENT PROOF</b>\n\n"
-                f"👤 User: @{username}\n"
-                f"🆔 ID: <code>{chat_id}</code>\n"
-                f"📦 Plan: <b>{plan_name}</b>\n\n"
-                f"👉 <b>Reply to THIS message with:</b> <code>OK YOUR_KEY</code>"
+                f"👤 User: @{username}\n🆔 ID: <code>{chat_id}</code>\n📦 Plan: <b>{plan_name}</b>\n\n"
+                f"👇 <b>IMPORTANT:</b>\nUs user ko key bhejne ke liye, is photo par <b>Reply (Swipe)</b> karein aur likhein:\n<code>OK YOUR_KEY</code>"
             )
             admin_msg = bot.send_message(ADMIN_ID, alert_text, parse_mode="HTML")
             admin_msg_map[admin_msg.message_id] = chat_id
@@ -245,15 +240,10 @@ def handle_user_messages(message):
             admin_msg_map[forwarded.message_id] = chat_id
         return
 
-    # 4. Agar normal chat me hai aur bina state ke kuch bheja hai
-    bot.reply_to(
-        message, 
-        "⚠️ Kripya menu ka use karein.",
-        reply_markup=get_main_menu(), parse_mode="HTML"
-    )
+    bot.reply_to(message, "⚠️ Kripya menu ka use karein.", reply_markup=get_main_menu(), parse_mode="HTML")
 
 # ═══════════════════════════════════════════════════════
-# 👑 ADMIN HANDLER (Replying to Any Message)
+# 👑 ADMIN REPLY HANDLER (Jab Admin sahi se reply kare)
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(func=lambda message: message.chat.id == ADMIN_ID and message.reply_to_message, content_types=['text', 'photo', 'document'])
 def handle_admin_reply(message):
@@ -264,7 +254,7 @@ def handle_admin_reply(message):
         bot.reply_to(message, "⚠️ <b>User ID not found.</b>\nAapne jis message ko reply kiya hai, wo bot ka forwarded message nahi hai.")
         return
 
-    # 1. Agar OK KEY hai (Payment Verification)
+    # 1. OK KEY
     if text.upper().startswith("OK "):
         license_key = text[3:].strip()
         try:
@@ -272,8 +262,7 @@ def handle_admin_reply(message):
                 user_chat_id,
                 f"🎉 <b>Payment Verified Successfully!</b>\n\n"
                 f"🔑 <b>Your License Key:</b>\n<code>{license_key}</code>\n\n"
-                f"✅ <b>Activation Process:</b>\n"
-                f"1. Open SuperBot software.\n2. Enter this key.\n3. Bot will start trading!",
+                f"✅ <b>Activation:</b> Open software, enter key, start trading!",
                 parse_mode="HTML"
             )
             bot.reply_to(message, f"✅ Key successfully sent to User ID: {user_chat_id}!")
@@ -282,7 +271,7 @@ def handle_admin_reply(message):
             bot.reply_to(message, f"❌ Error: {e}")
         return
 
-    # 2. Agar normal Text reply hai (Two-Way Chat)
+    # 2. Normal Text (Two-Way Chat)
     if text:
         try:
             bot.send_message(user_chat_id, f"👨‍💻 <b>Admin:</b> {text}", parse_mode="HTML")
@@ -290,7 +279,7 @@ def handle_admin_reply(message):
         except Exception as e:
             bot.reply_to(message, f"❌ Error: {e}")
             
-    # 3. Agar Admin photo bhejta hai
+    # 3. Photo
     elif message.photo:
         try:
             bot.send_photo(user_chat_id, message.photo[-1].file_id, caption=f"👨‍💻 <b>Admin:</b> {message.caption or ''}", parse_mode="HTML")
