@@ -7,7 +7,7 @@ from flask import Flask
 from groq import Groq
 
 # ═══════════════════════════════════════════════════════
-# CONFIGURATION (Render ke Environment Variables se aayega)
+# CONFIGURATION
 # ═══════════════════════════════════════════════════════
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE") 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789")) 
@@ -29,9 +29,8 @@ try:
 except Exception as e:
     pass
 
-# 🆕 Storage (Admin ke message ko User se jodne ke liye)
 user_plan = {}
-admin_msg_map = {} # Ye map batayega ki Admin ne kis message ka reply kiya hai
+admin_msg_map = {}
 
 PLAN_NAMES = {
     "plan_100": "1 Month ($100)",
@@ -40,17 +39,33 @@ PLAN_NAMES = {
     "plan_500": "1 Year ($500)"
 }
 
+# ═══════════════════════════════════════════════════════
+# 🆕 AI KNOWLEDGE BASE (SuperBot ke baare me sab kuch)
+# ═══════════════════════════════════════════════════════
 SYSTEM_PROMPT = """
-You are 'SuperBot Support AI', a helpful customer support assistant for a premium automated MetaTrader 5 (MT5) trading bot.
-Pricing: 1M=$100, 3M=$200, 6M=$300, 1Y=$500.
-Payment: USDT (TRC20 network).
-Answer politely in English or Hinglish. Keep it short. Do not guarantee profits.
+You are 'SuperBot Support AI', the official customer support assistant for the 'SuperBot v2.1.1' automated trading software.
+
+Here is everything you know about SuperBot:
+1. **What is it?**: It is a fully automated MetaTrader 5 (MT5) trading bot written in Python. It requires no manual trading.
+2. **Markets**: It trades EURUSD (Euro) and XAUUSD (Gold).
+3. **Strategy**: It uses 33+ technical concepts (Smart Money Concepts, Candlestick patterns, EMA, MACD, Fibonacci, etc.). It does NOT use paid AI APIs, so there are no monthly hidden fees.
+4. **Safety**: It has Anti-Blowup Protection (strict lot capping, min SL distance, and daily drawdown limits).
+5. **Dashboard**: It comes with a real-time GUI dashboard showing which concept triggered a trade, live PnL, and a strategy leaderboard.
+6. **Pricing**: 1 Month ($100), 3 Months ($200), 6 Months ($300), 1 Year ($500).
+7. **Payment**: We only accept USDT on the TRC20 network.
+8. **How to buy**: Tell the customer to click /start and select a plan, then send the payment screenshot.
+
+RULES:
+- ONLY answer questions related to SuperBot, trading, MT5, payments, or installation.
+- If someone asks a completely unrelated question (like "who is the president" or "what is the weather"), politely say: "Main sirf SuperBot se jude sawalon ka jawab de sakta hoon."
+- Talk like a friendly human (English or Hinglish, depending on the user).
+- Never guarantee profits. Always remind them that trading involves risk.
+- Keep answers short and helpful.
 """
 
 # ═══════════════════════════════════════════════════════
 # USER HANDLERS
 # ═══════════════════════════════════════════════════════
-
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
@@ -67,7 +82,7 @@ def send_welcome(message):
         bot.send_message(
             chat_id, 
             f"👋 <b>Welcome!</b>\n\nAapne <b>{plan_name}</b> select kiya hai.\n\n"
-            f"Kripya payment karein aur <b>Screenshot</b> bhejein.",
+            f"Kripya payment karein aur <b>Screenshot</b> bhejein. Agar koi sawal ho toh yahin poochhein!",
             reply_markup=markup, parse_mode="HTML"
         )
     else:
@@ -81,7 +96,7 @@ def send_welcome(message):
         bot.send_message(
             chat_id, 
             "👋 <b>Welcome to SuperBot!</b>\n\n"
-            "Plan select karein ya koi sawal poochhein (Main AI hoon!):", 
+            "Plan select karein ya apna koi bhi sawal poochhein (Main AI hoon, aapki puri madad karunga!):", 
             reply_markup=markup, parse_mode="HTML"
         )
 
@@ -97,7 +112,7 @@ def handle_callback(call):
             f"🪙 Coin: <b>USDT</b>\n"
             f"🌐 Network: <b>TRC20</b>\n"
             f"👛 Address:\n<code>{TRC20_WALLET}</code>\n\n"
-            f"Payment ke baad <b>Screenshot</b> bhejein!",
+            f"⚠️ Sirf TRC20 par payment karein.\nPayment ke baad <b>Screenshot</b> bhejein!",
             parse_mode="HTML"
         )
         
@@ -126,63 +141,58 @@ def handle_proof(message):
     plan_name = user_plan[chat_id]
     username = message.from_user.username or "No Username"
     
-    bot.reply_to(message, "⏳ <b>Proof Received!</b>\n\nAdmin verify kar raha hai. 1-2 ghante me key mil jayegi.", parse_mode="HTML")
+    bot.reply_to(message, "⏳ <b>Proof Received!</b>\n\nAdmin verify kar raha hai. Key mil jayegi.", parse_mode="HTML")
     
-    # Admin ko alert
     alert_text = (
         f"🚨 <b>NEW PAYMENT PROOF</b>\n\n"
         f"👤 User: @{username}\n"
         f"🆔 ID: <code>{chat_id}</code>\n"
         f"📦 Plan: <b>{plan_name}</b>\n\n"
-        f"👉 <b>Reply to this message with:</b> <code>OK YOUR_KEY</code>"
+        f"👉 <b>Reply to THIS message with:</b> <code>OK YOUR_KEY</code>"
     )
     admin_msg = bot.send_message(ADMIN_ID, alert_text, parse_mode="HTML")
+    admin_msg_map[admin_msg.message_id] = chat_id
     
-    # Photo forward karein aur map save karein
     forwarded = bot.forward_message(ADMIN_ID, chat_id, message.message_id)
-    admin_msg_map[forwarded.message_id] = chat_id 
+    admin_msg_map[forwarded.message_id] = chat_id
 
 # ═══════════════════════════════════════════════════════
-# 🆕 ADMIN REPLY HANDLER (Auto Delivery System)
+# ADMIN REPLY HANDLER (Auto Delivery)
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(func=lambda message: message.chat.id == ADMIN_ID and message.reply_to_message, content_types=['text'])
 def handle_admin_reply(message):
     text = message.text.strip()
     
-    # Check karein ki admin ne "OK" se start kiya hai ya nahi
     if text.upper().startswith("OK "):
-        license_key = text[3:].strip() # "OK " ke baad ki key nikaalein
-        
-        # Pata lagayein ki ye kis user ka screenshot tha
+        license_key = text[3:].strip()
         user_chat_id = admin_msg_map.get(message.reply_to_message.message_id)
         
         if user_chat_id:
-            # User ko key bhejein
-            bot.send_message(
-                user_chat_id,
-                f"🎉 <b>Payment Verified Successfully!</b>\n\n"
-                f"🔑 <b>Your License Key:</b>\n<code>{license_key}</code>\n\n"
-                f"✅ <b>How to Activate:</b>\n"
-                f"1. Open the bot software.\n"
-                f"2. Enter this key when prompted.\n"
-                f"3. Enjoy automated trading!\n\n"
-                f"Agar koi dikkat aaye, toh yahin message karein.",
-                parse_mode="HTML"
-            )
+            try:
+                bot.send_message(
+                    user_chat_id,
+                    f"🎉 <b>Payment Verified Successfully!</b>\n\n"
+                    f"🔑 <b>Your License Key:</b>\n<code>{license_key}</code>\n\n"
+                    f"✅ <b>How to Activate:</b>\n"
+                    f"1. Open the bot software.\n"
+                    f"2. Enter this key when prompted.\n"
+                    f"3. Enjoy automated trading!\n\n"
+                    f"Agar koi dikkat aaye, toh yahin message karein.",
+                    parse_mode="HTML"
+                )
+                bot.reply_to(message, f"✅ Key successfully sent to User ID: {user_chat_id}!")
+            except Exception as e:
+                bot.reply_to(message, f"❌ Error sending to user: {e}")
             
-            # Admin ko confirm karein
-            bot.reply_to(message, f"✅ Key successfully sent to User ID: {user_chat_id}!")
-            
-            # Clean up memory
             del admin_msg_map[message.reply_to_message.message_id]
             if user_chat_id in user_plan: del user_plan[user_chat_id]
         else:
-            bot.reply_to(message, "⚠️ User ID not found. Make sure you replied to the forwarded photo.")
+            bot.reply_to(message, "⚠️ User ID not found. Please make sure you are REPLYING (swiping) to the bot's alert message.")
     else:
-        bot.reply_to(message, "⚠️ Invalid format. Reply with: OK YOUR_KEY")
+        bot.reply_to(message, "⚠️ Invalid format. Please reply with: OK YOUR_KEY")
 
 # ═══════════════════════════════════════════════════════
-# AI CHAT HANDLER (Only for normal users, not admin replies)
+# 🆕 AI CHAT HANDLER (Answers all customer questions)
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.chat.id != ADMIN_ID)
 def handle_ai_chat(message):
@@ -196,7 +206,7 @@ def handle_ai_chat(message):
     bot.send_chat_action(chat_id, 'typing')
     try:
         response = ai_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.1-8b-instant", # Fast AI model
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_text}
@@ -205,7 +215,8 @@ def handle_ai_chat(message):
         )
         bot.reply_to(message, response.choices[0].message.content)
     except Exception as e:
-        bot.reply_to(message, "⚠️ Sorry, main busy hoon. /start dabayein.")
+        print(f"AI Error: {e}")
+        bot.reply_to(message, "⚠️ Sorry, main thoda busy hoon. Kripya thodi der baad poochhein ya /start dabayein.")
 
 # ═══════════════════════════════════════════════════════
 # SERVER START
