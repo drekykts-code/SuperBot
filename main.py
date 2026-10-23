@@ -16,7 +16,6 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# AI Client Initialize
 try:
     ai_client = Groq(api_key=GROQ_API_KEY)
     if not GROQ_API_KEY:
@@ -194,24 +193,24 @@ def handle_admin_reply(message):
             bot.reply_to(message, "⚠️ User ID not found. Please make sure you are REPLYING to the bot's alert message.")
 
 # ═══════════════════════════════════════════════════════
-# 🤖 AI CHAT HANDLER (Sabke liye open hai)
+# 🤖 AI CHAT HANDLER (Fixed Model)
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/'))
 def handle_ai_chat(message):
     chat_id = message.chat.id
     
-    # Agar Admin reply kar raha hai "OK KEY" se, toh AI disturb na kare
     if chat_id == ADMIN_ID and message.reply_to_message and message.text.strip().upper().startswith("OK "):
         return
 
     if not ai_client or not GROQ_API_KEY:
-        bot.reply_to(message, "⚠️ AI service is down. Admin se contact karein. (Missing GROQ_API_KEY)")
+        bot.reply_to(message, "⚠️ AI service is down. (Missing GROQ_API_KEY)")
         return
 
     bot.send_chat_action(chat_id, 'typing')
     try:
+        # 🔥 YAHAN NAYA MODEL USE KIYA HAI 🔥
         response = ai_client.chat.completions.create(
-            model="llama-3.3-70b-versatile", 
+            model="openai/gpt-oss-120b", 
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": message.text}
@@ -221,7 +220,19 @@ def handle_ai_chat(message):
         bot.reply_to(message, response.choices[0].message.content)
     except Exception as e:
         print(f"AI Error: {e}")
-        bot.reply_to(message, f"⚠️ AI Error: {str(e)[:50]}... Please check Render logs.")
+        # Fallback to llama-3.1-8b-instant if the new model fails
+        try:
+            response = ai_client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": message.text}
+                ],
+                temperature=0.6, max_tokens=300
+            )
+            bot.reply_to(message, response.choices[0].message.content)
+        except Exception as e2:
+            bot.reply_to(message, f"⚠️ AI Error: {str(e2)[:50]}... Please check Render logs.")
 
 # ═══════════════════════════════════════════════════════
 # SERVER START
