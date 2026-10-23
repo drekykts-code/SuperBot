@@ -42,19 +42,26 @@ PLAN_NAMES = {
     "plan_500": "1 Year ($500)"
 }
 
+# 🆕 AI ko sakhti se mana kiya gaya hai UPI bolne se
 SYSTEM_PROMPT = """
 You are 'SuperBot AI', a smart, fast, and polite sales agent for the 'SuperBot v2.1.1' automated MT5 trading bot.
+
 Knowledge:
 - Fully automated MT5 trading software (Python based, Windows).
 - Trades EURUSD and XAUUSD.
 - Uses 33+ technical concepts. No hidden AI fees.
 - Safety: Anti-Blowup Protection (lot capping, daily drawdown limits).
 - Pricing: 1M=$100, 3M=$200, 6M=$300, 1Y=$500.
-- Payment: USDT on TRC20 network.
+
+🚨 STRICT PAYMENT RULE 🚨:
+- We ONLY accept USDT on the TRC20 network.
+- NEVER mention UPI, Paytm, Bank Transfer, PayPal, or any other currency. 
+- If a user asks about payment, tell them: "Hum sirf USDT (TRC20) accept karte hain. Neeche 'Payment Details' button par click karein."
+
 Rules:
 1. Reply in Hindi (Hinglish) or English based on user's language.
 2. Be fast and persuasive.
-3. If they ask how to buy: Tell them to select a plan below, pay via TRC20, and send the screenshot.
+3. If they ask how to buy: Tell them to select a plan below, click 'Payment Details', pay via USDT TRC20, and send the screenshot.
 4. Keep answers short and crisp.
 """
 
@@ -72,7 +79,7 @@ def send_welcome(message):
         user_plan[chat_id] = plan_name
         
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("💳 Payment Details", callback_data="payment_info"))
+        markup.add(InlineKeyboardButton("💳 Payment Details (USDT)", callback_data="payment_info"))
         
         bot.send_message(
             chat_id, 
@@ -107,12 +114,14 @@ def handle_callback(call):
     
     if call.data == "payment_info":
         bot.answer_callback_query(call.id, "Details bhej rahe hain...")
+        # 🆕 Sahi Payment details (Sirf USDT TRC20)
         bot.send_message(
             chat_id,
-            f"💳 <b>Payment Details (USDT TRC20):</b>\n\n"
-            f"🪙 Coin: <b>USDT</b>\n🌐 Network: <b>TRC20</b>\n"
+            f"💳 <b>Payment Details (USDT TRC20 ONLY):</b>\n\n"
+            f"🪙 Coin: <b>USDT</b>\n🌐 Network: <b>TRC20 (Tron)</b>\n"
             f"👛 Address:\n<code>{TRC20_WALLET}</code>\n\n"
-            f"⚠️ Sirf TRC20 par payment karein.\nPayment ke baad <b>Screenshot</b> bhejein!",
+            f"⚠️ <b>Warning:</b> Sirf TRC20 par payment karein. Hum UPI ya koi aur payment accept nahi karte.\n\n"
+            f"Payment ke baad <b>Screenshot</b> bhejein!",
             parse_mode="HTML"
         )
         
@@ -122,7 +131,7 @@ def handle_callback(call):
         bot.answer_callback_query(call.id, f"{plan_name} Selected!")
         
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("💳 Payment Details", callback_data="payment_info"))
+        markup.add(InlineKeyboardButton("💳 Payment Details (USDT)", callback_data="payment_info"))
         bot.edit_message_text(
             chat_id=chat_id, message_id=call.message.message_id,
             text=f"✅ Aapne <b>{plan_name}</b> select kiya hai.\n\nKripya payment karein aur screenshot bhejein.",
@@ -193,7 +202,7 @@ def handle_admin_reply(message):
             bot.reply_to(message, "⚠️ User ID not found. Please make sure you are REPLYING to the bot's alert message.")
 
 # ═══════════════════════════════════════════════════════
-# 🤖 AI CHAT HANDLER (Fixed Model)
+# 🤖 AI CHAT HANDLER 
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/'))
 def handle_ai_chat(message):
@@ -208,19 +217,18 @@ def handle_ai_chat(message):
 
     bot.send_chat_action(chat_id, 'typing')
     try:
-        # 🔥 YAHAN NAYA MODEL USE KIYA HAI 🔥
         response = ai_client.chat.completions.create(
             model="openai/gpt-oss-120b", 
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": message.text}
             ],
-            temperature=0.6, max_tokens=300
+            temperature=0.5, max_tokens=250
         )
         bot.reply_to(message, response.choices[0].message.content)
     except Exception as e:
         print(f"AI Error: {e}")
-        # Fallback to llama-3.1-8b-instant if the new model fails
+        # Fallback if primary model fails
         try:
             response = ai_client.chat.completions.create(
                 model="llama-3.1-8b-instant",
@@ -228,11 +236,11 @@ def handle_ai_chat(message):
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": message.text}
                 ],
-                temperature=0.6, max_tokens=300
+                temperature=0.5, max_tokens=250
             )
             bot.reply_to(message, response.choices[0].message.content)
         except Exception as e2:
-            bot.reply_to(message, f"⚠️ AI Error: {str(e2)[:50]}... Please check Render logs.")
+            bot.reply_to(message, "⚠️ AI is busy. Please try again.")
 
 # ═══════════════════════════════════════════════════════
 # SERVER START
