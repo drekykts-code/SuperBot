@@ -7,7 +7,7 @@ from flask import Flask
 from groq import Groq
 
 # ═══════════════════════════════════════════════════════
-# CONFIGURATION
+# CONFIGURATION (Render Environment Variables)
 # ═══════════════════════════════════════════════════════
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE") 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0")) 
@@ -17,14 +17,18 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 bot = telebot.TeleBot(BOT_TOKEN)
 
 try:
+    if not GROQ_API_KEY:
+        print("⚠️ CRITICAL: GROQ_API_KEY is completely missing in Render!")
     ai_client = Groq(api_key=GROQ_API_KEY)
-except Exception:
+except Exception as e:
     ai_client = None
+    print(f"⚠️ AI Init Error: {e}")
 
 app = Flask(__name__)
 
 try:
     bot.remove_webhook()
+    print("✅ Webhook removed successfully.")
 except Exception:
     pass
 
@@ -38,26 +42,19 @@ PLAN_NAMES = {
     "plan_500": "1 Year ($500)"
 }
 
-# 🆕 STRICT PROMPT: AI ko chhota aur seedha jawab dene ko kaha gaya hai
 SYSTEM_PROMPT = """
 You are 'SuperBot AI', a professional sales agent for the 'SuperBot v2.1.1' automated MT5 trading bot.
 Your ONLY goal is to answer the user's question briefly and encourage them to buy a plan.
-
 FACTS:
 - Automated MT5 bot (EURUSD & XAUUSD).
 - 33+ Strategies, Anti-Blowup protection.
 - Payment: USDT TRC20 ONLY.
-
 RULES:
 1. Reply in Hindi (Hinglish) or English based on the user.
 2. MAXIMUM 2 SENTENCES. Do not write long paragraphs.
 3. DO NOT talk about unrelated topics. Keep it strictly about the bot and payment.
-4. Always end with: "Neeche diye gaye buttons se plan select karein ya payment details dekhein."
 """
 
-# ═══════════════════════════════════════════════════════
-# START COMMAND
-# ═══════════════════════════════════════════════════════
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
@@ -78,7 +75,6 @@ def send_welcome(message):
             reply_markup=markup, parse_mode="HTML"
         )
     else:
-        # Buttons for plans + payment
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
             InlineKeyboardButton("1 Month ($100)", callback_data="plan_100"),
@@ -96,9 +92,6 @@ def send_welcome(message):
             reply_markup=markup, parse_mode="HTML"
         )
 
-# ═══════════════════════════════════════════════════════
-# CALLBACK HANDLER (Buttons)
-# ═══════════════════════════════════════════════════════
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     chat_id = call.message.chat.id
@@ -128,13 +121,9 @@ def handle_callback(call):
             reply_markup=markup, parse_mode="HTML"
         )
 
-# ═══════════════════════════════════════════════════════
-# PHOTO HANDLER (Payment Proof)
-# ═══════════════════════════════════════════════════════
 @bot.message_handler(content_types=['photo', 'document'])
 def handle_proof(message):
     chat_id = message.chat.id
-    
     if chat_id not in user_plan:
         bot.reply_to(message, "⚠️ Kripya pehle plan select karein (/start dabayein)!")
         return
@@ -158,13 +147,9 @@ def handle_proof(message):
         forwarded = bot.forward_message(ADMIN_ID, chat_id, message.message_id)
         admin_msg_map[forwarded.message_id] = chat_id
 
-# ═══════════════════════════════════════════════════════
-# 👑 ADMIN OK KEY HANDLER
-# ═══════════════════════════════════════════════════════
 @bot.message_handler(func=lambda message: message.chat.id == ADMIN_ID and message.reply_to_message, content_types=['text'])
 def handle_admin_reply(message):
     text = message.text.strip()
-    
     if text.upper().startswith("OK "):
         license_key = text[3:].strip()
         user_chat_id = admin_msg_map.get(message.reply_to_message.message_id)
@@ -176,10 +161,7 @@ def handle_admin_reply(message):
                     f"🎉 <b>Payment Verified Successfully!</b>\n\n"
                     f"🔑 <b>Your License Key:</b>\n<code>{license_key}</code>\n\n"
                     f"✅ <b>Activation Process:</b>\n"
-                    f"1. Open SuperBot software.\n"
-                    f"2. Enter this key.\n"
-                    f"3. Bot will start trading!\n\n"
-                    f"Koi dikkat aaye toh message karein.",
+                    f"1. Open SuperBot software.\n2. Enter this key.\n3. Bot will start trading!",
                     parse_mode="HTML"
                 )
                 bot.reply_to(message, f"✅ Key successfully sent to User ID: {user_chat_id}!")
@@ -190,7 +172,7 @@ def handle_admin_reply(message):
             if user_chat_id in user_plan: del user_plan[user_chat_id]
 
 # ═══════════════════════════════════════════════════════
-# 🤖 AI CHAT HANDLER (Short reply + Always show buttons)
+# 🤖 AI CHAT HANDLER (With Debugging)
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/'))
 def handle_ai_chat(message):
@@ -200,23 +182,23 @@ def handle_ai_chat(message):
         return
 
     if not ai_client or not GROQ_API_KEY:
-        bot.reply_to(message, "⚠️ AI service is down. (Missing GROQ_API_KEY)")
+        bot.reply_to(message, "⚠️ AI service down hai. Admin check karein.")
         return
 
     bot.send_chat_action(chat_id, 'typing')
     try:
+        # Using the most stable model
         response = ai_client.chat.completions.create(
-            model="llama-3.1-8b-instant", # Fast model for quick, short answers
+            model="llama-3.1-8b-instant",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": message.text}
             ],
-            temperature=0.4, max_tokens=100 # Max tokens restricted to keep it short
+            temperature=0.5, max_tokens=150
         )
         
         ai_reply = response.choices[0].message.content
         
-        # 🆕 HAR REPLY KE SAATH BUTTONS AUR PAYMENT MESSAGE
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
             InlineKeyboardButton("1 Month ($100)", callback_data="plan_100"),
@@ -226,18 +208,18 @@ def handle_ai_chat(message):
             InlineKeyboardButton("💳 Payment Details (USDT)", callback_data="payment_info")
         )
         
-        # Add standard footer
-        final_msg = f"{ai_reply}\n\n👇 <b>Buy SuperBot:</b>\nNeeche se plan select karein ya payment details dekhein."
-        
-        bot.reply_to(message, final_msg, reply_markup=markup, parse_mode="HTML")
+        bot.reply_to(message, ai_reply, reply_markup=markup, parse_mode="HTML")
 
     except Exception as e:
-        print(f"AI Error: {e}")
-        bot.reply_to(message, "⚠️ AI is busy. Kripya /start dabayein.")
+        error_msg = str(e)
+        print(f"AI Error: {error_msg}")
         
-# ═══════════════════════════════════════════════════════
-# SERVER START
-# ═══════════════════════════════════════════════════════
+        # 🆕 Yahan bot aapko (Admin ko) exact error bhejega
+        if ADMIN_ID != 0:
+            bot.send_message(ADMIN_ID, f"🚨 <b>AI ERROR DETECTED</b>\n\n<code>{error_msg}</code>\n\n<b>Possible Reason:</b> Groq API Key invalid hai, limit khatam ho gayi hai, ya Render me key save nahi hui.", parse_mode="HTML")
+            
+        bot.reply_to(message, "⚠️ AI thoda busy hai. Kripya thodi der baad try karein ya /start dabayein.")
+
 @app.route('/')
 def home(): return "SuperBot Server is Alive!"
 
