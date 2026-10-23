@@ -1,11 +1,12 @@
 import os
 import threading
+import time
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 
 # ═══════════════════════════════════════════════════════
-# CONFIGURATION (Ye Render ke Environment Variables se aayega)
+# CONFIGURATION (Render ke Environment Variables se aayega)
 # ═══════════════════════════════════════════════════════
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE") 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789")) 
@@ -14,11 +15,18 @@ TRC20_WALLET = os.getenv("TRC20_WALLET", "T_YOUR_DEFAULT_ADDRESS_HERE")
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# Temp Storage (Restart hone par clear ho jayega, production me DB use karein)
+# 🔥 AUTO FIX: Purana webhook delete karo taaki naya bot polling me atak na jaye
+try:
+    bot.remove_webhook()
+    print("✅ Webhook removed successfully.")
+except Exception as e:
+    print(f"⚠️ Webhook removal error: {e}")
+
+# Temp Storage
 user_plan = {}
 
 # ═══════════════════════════════════════════════════════
-# PLAN MAP (Website ke deep links se match karta hai)
+# PLAN MAP
 # ═══════════════════════════════════════════════════════
 PLAN_NAMES = {
     "plan_100": "1 Month ($100)",
@@ -36,7 +44,6 @@ def send_welcome(message):
     chat_id = message.chat.id
     args = message.text.split()
 
-    # Check karein ki user website ke link se aaya hai ya nahi
     if len(args) > 1:
         plan_code = args[1]
         plan_name = PLAN_NAMES.get(plan_code, "Unknown Plan")
@@ -54,7 +61,6 @@ def send_welcome(message):
             parse_mode="HTML"
         )
     else:
-        # Agar koi direct bot par aaya bina plan select kiye
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
             InlineKeyboardButton("1 Month ($100)", callback_data="plan_100"),
@@ -84,7 +90,7 @@ def handle_callback(call):
             f"🌐 Network: <b>TRC20 (Tron)</b>\n"
             f"👛 Wallet Address:\n"
             f"<code>{TRC20_WALLET}</code>\n\n"
-            f"⚠️ <b>Important:</b> Sirf TRC20 network par hi payment karein. Galat network par bhejne se paisa loss ho sakta hai.\n\n"
+            f"⚠️ <b>Important:</b> Sirf TRC20 network par hi payment karein.\n\n"
             f"Payment ke baad <b>Screenshot</b> ya <b>Transaction Hash (TxID)</b> yahan bhejein!",
             parse_mode="HTML"
         )
@@ -94,11 +100,16 @@ def handle_callback(call):
         user_plan[chat_id] = plan_name
         
         bot.answer_callback_query(call.id, f"{plan_name} Selected!")
+        
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("💳 Payment Details (USDT TRC20)", callback_data="payment_info"))
+        
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=call.message.message_id,
             text=f"✅ Aapne <b>{plan_name}</b> select kiya hai.\n\n"
-                 f"Kripya payment karein aur screenshot yahan bhejein.",
+                 f"Kripya payment details dekhein aur screenshot bhejein.",
+            reply_markup=markup,
             parse_mode="HTML"
         )
 
@@ -113,10 +124,8 @@ def handle_proof(message):
     plan_name = user_plan[chat_id]
     username = message.from_user.username or "No Username"
     
-    # 1. User ko confirmation
     bot.reply_to(message, "⏳ <b>Proof Received!</b>\n\nAdmin aapka payment verify kar raha hai. 1-2 ghante me bot access mil jayega.", parse_mode="HTML")
     
-    # 2. Admin ko alert
     alert_text = (
         f"🚨 <b>NAYA PAYMENT PROOF</b> 🚨\n\n"
         f"👤 Username: @{username}\n"
@@ -125,8 +134,6 @@ def handle_proof(message):
         f"⚠️ Niche forward ki hui photo check karein."
     )
     bot.send_message(ADMIN_ID, alert_text, parse_mode="HTML")
-    
-    # 3. Photo Admin ko forward
     bot.forward_message(ADMIN_ID, chat_id, message.message_id)
 
 @bot.message_handler(func=lambda message: True)
@@ -134,15 +141,20 @@ def handle_text(message):
     bot.reply_to(message, "📸 Kripya payment ka screenshot (photo) bhejein. Ya /start karke plan select karein.")
 
 # ═══════════════════════════════════════════════════════
-# FLASK SERVER (Render ke liye)
+# FLASK SERVER & BOT START
 # ═══════════════════════════════════════════════════════
 @app.route('/')
 def home():
     return "SuperBot Telegram Server is Alive!"
 
 def run_bot():
-    print("Bot is starting...")
-    bot.infinity_polling(skip_pending=True)
+    print("🚀 Bot is starting (Polling Mode)...")
+    while True:
+        try:
+            bot.infinity_polling(skip_pending=True, timeout=20, long_polling_timeout=10)
+        except Exception as e:
+            print(f"⚠️ Polling error: {e}")
+            time.sleep(5) # Agar error aaye toh 5 second baad wapas start hoga
 
 if __name__ == '__main__':
     threading.Thread(target=run_bot, daemon=True).start()
