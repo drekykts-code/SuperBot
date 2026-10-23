@@ -5,15 +5,16 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 
 # ═══════════════════════════════════════════════════════
-# CONFIGURATION (Render ke Environment Variables me daalein)
+# CONFIGURATION (Ye Render ke Environment Variables se aayega)
 # ═══════════════════════════════════════════════════════
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE") 
-ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789")) # Apna Telegram ID daalein
+ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789")) 
+TRC20_WALLET = os.getenv("TRC20_WALLET", "T_YOUR_DEFAULT_ADDRESS_HERE")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# Temp Storage
+# Temp Storage (Restart hone par clear ho jayega, production me DB use karein)
 user_plan = {}
 
 # ═══════════════════════════════════════════════════════
@@ -42,14 +43,13 @@ def send_welcome(message):
         user_plan[chat_id] = plan_name
         
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("💳 Payment Details", callback_data="payment_info"))
+        markup.add(InlineKeyboardButton("💳 Payment Details (USDT TRC20)", callback_data="payment_info"))
         
         bot.send_message(
             chat_id, 
             f"👋 <b>Welcome to SuperBot!</b>\n\n"
             f"Aapne <b>{plan_name}</b> plan select kiya hai.\n\n"
-            f"Kripya payment karein aur uska <b>Screenshot</b> yahan bhejein.\n"
-            f"Admin verify karke aapko bot access de dega.",
+            f"Kripya payment details dekhein aur payment ke baad <b>Screenshot</b> yahan bhejein.",
             reply_markup=markup,
             parse_mode="HTML"
         )
@@ -76,14 +76,19 @@ def handle_callback(call):
     
     if call.data == "payment_info":
         bot.answer_callback_query(call.id, "Payment details bhej rahe hain...")
+        
         bot.send_message(
             chat_id,
-            "💳 <b>Payment Details:</b>\n\n"
-            "UPI ID: <code>yourupi@bank</code>\n"
-            "Ya direct QR code scan karein (Admin se mangwayein).\n\n"
-            "Payment ke baad <b>Screenshot</b> zaroor bhejein!",
+            f"💳 <b>Payment Details (USDT TRC20):</b>\n\n"
+            f"🪙 Coin: <b>USDT</b>\n"
+            f"🌐 Network: <b>TRC20 (Tron)</b>\n"
+            f"👛 Wallet Address:\n"
+            f"<code>{TRC20_WALLET}</code>\n\n"
+            f"⚠️ <b>Important:</b> Sirf TRC20 network par hi payment karein. Galat network par bhejne se paisa loss ho sakta hai.\n\n"
+            f"Payment ke baad <b>Screenshot</b> ya <b>Transaction Hash (TxID)</b> yahan bhejein!",
             parse_mode="HTML"
         )
+        
     elif call.data.startswith("plan_"):
         plan_name = PLAN_NAMES.get(call.data, "Unknown Plan")
         user_plan[chat_id] = plan_name
@@ -101,7 +106,6 @@ def handle_callback(call):
 def handle_proof(message):
     chat_id = message.chat.id
     
-    # Check karein ki user ne plan select kiya hai ya nahi
     if chat_id not in user_plan:
         bot.reply_to(message, "⚠️ Kripya pehle /start karke apna plan select karein!")
         return
@@ -109,10 +113,10 @@ def handle_proof(message):
     plan_name = user_plan[chat_id]
     username = message.from_user.username or "No Username"
     
-    # 1. User ko confirmation bhejein
+    # 1. User ko confirmation
     bot.reply_to(message, "⏳ <b>Proof Received!</b>\n\nAdmin aapka payment verify kar raha hai. 1-2 ghante me bot access mil jayega.", parse_mode="HTML")
     
-    # 2. Admin ko alert bhejein
+    # 2. Admin ko alert
     alert_text = (
         f"🚨 <b>NAYA PAYMENT PROOF</b> 🚨\n\n"
         f"👤 Username: @{username}\n"
@@ -122,7 +126,7 @@ def handle_proof(message):
     )
     bot.send_message(ADMIN_ID, alert_text, parse_mode="HTML")
     
-    # 3. Photo Admin ko forward karein
+    # 3. Photo Admin ko forward
     bot.forward_message(ADMIN_ID, chat_id, message.message_id)
 
 @bot.message_handler(func=lambda message: True)
