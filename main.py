@@ -18,7 +18,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 
 try:
     ai_client = Groq(api_key=GROQ_API_KEY)
-except Exception as e:
+except Exception:
     ai_client = None
 
 app = Flask(__name__)
@@ -28,12 +28,9 @@ try:
 except Exception:
     pass
 
-# ═══════════════════════════════════════════════════════
-# USER STATE MANAGEMENT
-# ═══════════════════════════════════════════════════════
 user_plan = {}
-admin_msg_map = {}
-user_state = {} # 'main' ya 'ai_chat' track karne ke liye
+admin_msg_map = {} # Forwarded message ID -> User Chat ID
+user_state = {}    # 'main', 'ai_chat', 'admin_chat'
 
 PLAN_NAMES = {
     "plan_100": "1 Month ($100)",
@@ -50,6 +47,14 @@ Keep answers short (max 2 sentences). Be helpful.
 """
 
 # ═══════════════════════════════════════════════════════
+# ID CHECK COMMAND
+# ═══════════════════════════════════════════════════════
+@bot.message_handler(commands=['id'])
+def send_id(message):
+    chat_id = message.chat.id
+    bot.reply_to(message, f"🆔 Aapki Telegram ID: <code>{chat_id}</code>\n\nMake sure Render ke Environment me <code>ADMIN_ID</code> me yahi number daala ho.", parse_mode="HTML")
+
+# ═══════════════════════════════════════════════════════
 # MENU BUILDERS
 # ═══════════════════════════════════════════════════════
 def get_main_menu():
@@ -57,7 +62,7 @@ def get_main_menu():
     markup.add(
         InlineKeyboardButton("💳 Buy Plan / Pricing", callback_data="menu_buy"),
         InlineKeyboardButton("🤖 AI Support Chat", callback_data="menu_ai"),
-        InlineKeyboardButton("📞 Contact Admin", callback_data="menu_contact")
+        InlineKeyboardButton("📞 Chat with Admin", callback_data="menu_contact")
     )
     return markup
 
@@ -77,13 +82,18 @@ def get_ai_menu():
     markup.add(InlineKeyboardButton("❌ Exit AI Chat", callback_data="menu_main"))
     return markup
 
+def get_admin_chat_menu():
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("❌ Exit Admin Chat", callback_data="menu_main"))
+    return markup
+
 # ═══════════════════════════════════════════════════════
 # START & MENU HANDLERS
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
-    user_state[chat_id] = 'main' # Default state
+    user_state[chat_id] = 'main'
     args = message.text.split()
 
     if len(args) > 1:
@@ -132,17 +142,17 @@ def handle_callback(call):
         user_state[chat_id] = 'ai_chat'
         bot.edit_message_text(
             chat_id=chat_id, message_id=call.message.message_id,
-            text="🤖 <b>AI Support Activated!</b>\n\nAap ab yahan apne sawal type karke poochh sakte hain. Main aapki puri madad karunga.\n\n<i>(Wapas menu me aane ke liye neeche Exit button dabayein)</i>",
+            text="🤖 <b>AI Support Activated!</b>\n\nAap ab yahan apne sawal type karke poochh sakte hain. Main aapki puri madad karunga.",
             reply_markup=get_ai_menu(), parse_mode="HTML"
         )
 
     elif call.data == "menu_contact":
-        bot.send_message(
-            chat_id, 
-            f"📞 <b>Contact Admin</b>\n\nAgar aapko koi dikkat aaye, toh aap direct admin se baat kar sakte hain.\nAdmin ID: <code>{ADMIN_ID}</code>",
-            parse_mode="HTML"
+        user_state[chat_id] = 'admin_chat'
+        bot.edit_message_text(
+            chat_id=chat_id, message_id=call.message.message_id,
+            text="📞 <b>Admin Chat Activated!</b>\n\nAap ab apna message type karke bhej sakte hain. Admin aapko yahan reply karenge.",
+            reply_markup=get_admin_chat_menu(), parse_mode="HTML"
         )
-        bot.answer_callback_query(call.id)
 
     elif call.data == "payment_info":
         bot.answer_callback_query(call.id, "Details bhej rahe hain...")
@@ -172,102 +182,121 @@ def handle_callback(call):
         )
 
 # ═══════════════════════════════════════════════════════
-# PHOTO HANDLER (Payment Proof)
+# USER MESSAGE HANDLER (Text, Photo, Doc)
 # ═══════════════════════════════════════════════════════
-@bot.message_handler(content_types=['photo', 'document'])
-def handle_proof(message):
+@bot.message_handler(func=lambda message: message.chat.id != ADMIN_ID, content_types=['text', 'photo', 'document'])
+def handle_user_messages(message):
     chat_id = message.chat.id
-    
-    if chat_id not in user_plan:
-        bot.reply_to(message, "⚠️ Kripya pehle 'Buy Plan' me jaakar plan select karein!")
+    state = user_state.get(chat_id, 'main')
+
+    # 1. Agar user Admin Chat me hai
+    if state == 'admin_chat':
+        # Forward to Admin
+        if ADMIN_ID != 0:
+            try:
+                forwarded = bot.forward_message(ADMIN_ID, chat_id, message.message_id)
+                admin_msg_map[forwarded.message_id] = chat_id
+                bot.reply_to(message, "✅ <b>Message sent to Admin!</b>\nAdmin jaldi reply karenge.", parse_mode="HTML")
+            except Exception as e:
+                bot.reply_to(message, "⚠️ Admin ko message nahi bhej paye. Thodi der baad try karein.")
         return
 
-    plan_name = user_plan[chat_id]
-    username = message.from_user.username or "No Username"
-    
-    bot.reply_to(message, "⏳ <b>Proof Received!</b>\n\nAdmin verify kar raha hai. Aapko jaldi hi key mil jayegi.", parse_mode="HTML")
-    
-    if ADMIN_ID != 0:
-        alert_text = (
-            f"🚨 <b>NEW PAYMENT PROOF</b>\n\n"
-            f"👤 User: @{username}\n"
-            f"🆔 ID: <code>{chat_id}</code>\n"
-            f"📦 Plan: <b>{plan_name}</b>\n\n"
-            f"👉 <b>Reply to THIS message with:</b> <code>OK YOUR_KEY</code>"
-        )
-        admin_msg = bot.send_message(ADMIN_ID, alert_text, parse_mode="HTML")
-        admin_msg_map[admin_msg.message_id] = chat_id
+    # 2. Agar user AI Chat me hai
+    if state == 'ai_chat' and message.text:
+        if not ai_client or not GROQ_API_KEY:
+            bot.reply_to(message, "⚠️ AI service is down.")
+            return
+            
+        bot.send_chat_action(chat_id, 'typing')
+        try:
+            response = ai_client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": message.text}
+                ],
+                temperature=0.5, max_tokens=150
+            )
+            bot.reply_to(message, response.choices[0].message.content, reply_markup=get_ai_menu())
+        except Exception as e:
+            print(f"AI Error: {e}")
+            bot.reply_to(message, "⚠️ AI is busy. Please try again.")
+        return
+
+    # 3. Agar user payment proof bhej raha hai (Plan selected)
+    if message.content_type in ['photo', 'document'] and chat_id in user_plan:
+        plan_name = user_plan[chat_id]
+        username = message.from_user.username or "No Username"
         
-        forwarded = bot.forward_message(ADMIN_ID, chat_id, message.message_id)
-        admin_msg_map[forwarded.message_id] = chat_id
+        bot.reply_to(message, "⏳ <b>Proof Received!</b>\n\nAdmin verify kar raha hai.", parse_mode="HTML")
+        
+        if ADMIN_ID != 0:
+            alert_text = (
+                f"🚨 <b>NEW PAYMENT PROOF</b>\n\n"
+                f"👤 User: @{username}\n"
+                f"🆔 ID: <code>{chat_id}</code>\n"
+                f"📦 Plan: <b>{plan_name}</b>\n\n"
+                f"👉 <b>Reply to THIS message with:</b> <code>OK YOUR_KEY</code>"
+            )
+            admin_msg = bot.send_message(ADMIN_ID, alert_text, parse_mode="HTML")
+            admin_msg_map[admin_msg.message_id] = chat_id
+            
+            forwarded = bot.forward_message(ADMIN_ID, chat_id, message.message_id)
+            admin_msg_map[forwarded.message_id] = chat_id
+        return
+
+    # 4. Agar normal chat me hai aur bina state ke kuch bheja hai
+    bot.reply_to(
+        message, 
+        "⚠️ Kripya menu ka use karein.",
+        reply_markup=get_main_menu(), parse_mode="HTML"
+    )
 
 # ═══════════════════════════════════════════════════════
-# 👑 ADMIN OK KEY HANDLER
+# 👑 ADMIN HANDLER (Replying to Any Message)
 # ═══════════════════════════════════════════════════════
-@bot.message_handler(func=lambda message: message.chat.id == ADMIN_ID and message.reply_to_message, content_types=['text'])
+@bot.message_handler(func=lambda message: message.chat.id == ADMIN_ID and message.reply_to_message, content_types=['text', 'photo', 'document'])
 def handle_admin_reply(message):
-    text = message.text.strip()
+    text = message.text or ""
+    user_chat_id = admin_msg_map.get(message.reply_to_message.message_id)
+
+    if not user_chat_id:
+        bot.reply_to(message, "⚠️ <b>User ID not found.</b>\nAapne jis message ko reply kiya hai, wo bot ka forwarded message nahi hai.")
+        return
+
+    # 1. Agar OK KEY hai (Payment Verification)
     if text.upper().startswith("OK "):
         license_key = text[3:].strip()
-        user_chat_id = admin_msg_map.get(message.reply_to_message.message_id)
-        
-        if user_chat_id:
-            try:
-                bot.send_message(
-                    user_chat_id,
-                    f"🎉 <b>Payment Verified Successfully!</b>\n\n"
-                    f"🔑 <b>Your License Key:</b>\n<code>{license_key}</code>\n\n"
-                    f"✅ <b>Activation Process:</b>\n"
-                    f"1. Open SuperBot software.\n2. Enter this key.\n3. Bot will start trading!",
-                    parse_mode="HTML"
-                )
-                bot.reply_to(message, f"✅ Key successfully sent to User ID: {user_chat_id}!")
-            except Exception as e:
-                bot.reply_to(message, f"❌ Error: {e}")
-            
-            del admin_msg_map[message.reply_to_message.message_id]
+        try:
+            bot.send_message(
+                user_chat_id,
+                f"🎉 <b>Payment Verified Successfully!</b>\n\n"
+                f"🔑 <b>Your License Key:</b>\n<code>{license_key}</code>\n\n"
+                f"✅ <b>Activation Process:</b>\n"
+                f"1. Open SuperBot software.\n2. Enter this key.\n3. Bot will start trading!",
+                parse_mode="HTML"
+            )
+            bot.reply_to(message, f"✅ Key successfully sent to User ID: {user_chat_id}!")
             if user_chat_id in user_plan: del user_plan[user_chat_id]
-
-# ═══════════════════════════════════════════════════════
-# 🤖 AI CHAT HANDLER (Only works if state is 'ai_chat')
-# ═══════════════════════════════════════════════════════
-@bot.message_handler(func=lambda message: message.text and not message.text.startswith('/'))
-def handle_ai_chat(message):
-    chat_id = message.chat.id
-    
-    # Admin OK command check
-    if chat_id == ADMIN_ID and message.reply_to_message and message.text.strip().upper().startswith("OK "):
+        except Exception as e:
+            bot.reply_to(message, f"❌ Error: {e}")
         return
 
-    # Check state: Agar user AI chat me nahi hai, toh use menu dikhao
-    if user_state.get(chat_id) != 'ai_chat':
-        bot.reply_to(
-            message, 
-            "⚠️ AI Chat active nahi hai. Kripya neeche diye gaye menu se <b>'AI Support Chat'</b> par click karein.",
-            reply_markup=get_main_menu(), parse_mode="HTML"
-        )
-        return
-
-    if not ai_client or not GROQ_API_KEY:
-        bot.reply_to(message, "⚠️ AI service is down. Admin check karein.")
-        return
-
-    bot.send_chat_action(chat_id, 'typing')
-    try:
-        response = ai_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": message.text}
-            ],
-            temperature=0.5, max_tokens=150
-        )
-        # Reply with AI and the Exit button
-        bot.reply_to(message, response.choices[0].message.content, reply_markup=get_ai_menu())
-
-    except Exception as e:
-        print(f"AI Error: {e}")
-        bot.reply_to(message, "⚠️ AI is busy. Please try again.")
+    # 2. Agar normal Text reply hai (Two-Way Chat)
+    if text:
+        try:
+            bot.send_message(user_chat_id, f"👨‍💻 <b>Admin:</b> {text}", parse_mode="HTML")
+            bot.reply_to(message, "✅ Message sent to user!")
+        except Exception as e:
+            bot.reply_to(message, f"❌ Error: {e}")
+            
+    # 3. Agar Admin photo bhejta hai
+    elif message.photo:
+        try:
+            bot.send_photo(user_chat_id, message.photo[-1].file_id, caption=f"👨‍💻 <b>Admin:</b> {message.caption or ''}", parse_mode="HTML")
+            bot.reply_to(message, "✅ Photo sent to user!")
+        except Exception as e:
+            bot.reply_to(message, f"❌ Error: {e}")
 
 @app.route('/')
 def home(): return "SuperBot Server is Alive!"
@@ -276,7 +305,6 @@ def run_bot():
     print("🚀 Bot is starting...")
     while True:
         try:
-            # 🆕 Fixed polling to avoid infinite start loops
             bot.infinity_polling(skip_pending=True, timeout=20, long_polling_timeout=10, none_stop=True)
         except Exception:
             time.sleep(5)
