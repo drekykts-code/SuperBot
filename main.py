@@ -7,7 +7,7 @@ from flask import Flask
 from groq import Groq
 
 # ═══════════════════════════════════════════════════════
-# CONFIGURATION
+# CONFIGURATION (Render Environment Variables)
 # ═══════════════════════════════════════════════════════
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE") 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789")) 
@@ -17,20 +17,24 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "YOUR_GROQ_KEY_HERE")
 bot = telebot.TeleBot(BOT_TOKEN)
 
 try:
+    # Groq AI (Fastest & Smartest)
     ai_client = Groq(api_key=GROQ_API_KEY)
 except Exception as e:
     ai_client = None
+    print(f"AI Init Error: {e}")
 
 app = Flask(__name__)
 
 try:
     bot.remove_webhook()
     print("✅ Webhook removed successfully.")
-except Exception as e:
+except Exception:
     pass
 
+# Storage
 user_plan = {}
 admin_msg_map = {}
+active_users = set() # Jinko key mil chuki hai
 
 PLAN_NAMES = {
     "plan_100": "1 Month ($100)",
@@ -40,37 +44,38 @@ PLAN_NAMES = {
 }
 
 # ═══════════════════════════════════════════════════════
-# 🆕 AI KNOWLEDGE BASE (SuperBot ke baare me sab kuch)
+# 🧠 AI BRAIN (SUPER SMART PROMPT)
 # ═══════════════════════════════════════════════════════
 SYSTEM_PROMPT = """
-You are 'SuperBot Support AI', the official customer support assistant for the 'SuperBot v2.1.1' automated trading software.
+You are 'SuperBot AI', an ultra-smart, fast, and polite sales agent and tech support for the 'SuperBot v2.1.1' automated MT5 trading bot.
 
-Here is everything you know about SuperBot:
-1. **What is it?**: It is a fully automated MetaTrader 5 (MT5) trading bot written in Python. It requires no manual trading.
-2. **Markets**: It trades EURUSD (Euro) and XAUUSD (Gold).
-3. **Strategy**: It uses 33+ technical concepts (Smart Money Concepts, Candlestick patterns, EMA, MACD, Fibonacci, etc.). It does NOT use paid AI APIs, so there are no monthly hidden fees.
-4. **Safety**: It has Anti-Blowup Protection (strict lot capping, min SL distance, and daily drawdown limits).
-5. **Dashboard**: It comes with a real-time GUI dashboard showing which concept triggered a trade, live PnL, and a strategy leaderboard.
-6. **Pricing**: 1 Month ($100), 3 Months ($200), 6 Months ($300), 1 Year ($500).
-7. **Payment**: We only accept USDT on the TRC20 network.
-8. **How to buy**: Tell the customer to click /start and select a plan, then send the payment screenshot.
+YOUR KNOWLEDGE BASE:
+- **What is it?**: A fully automated MetaTrader 5 (MT5) trading software. It runs 24/7 on your PC (Windows).
+- **Markets**: Trades EURUSD (Euro) and XAUUSD (Gold) only.
+- **Strategy**: Uses 33+ advanced concepts (SMC, Candlestick patterns, EMA, MACD, Fibonacci). It does NOT use paid AI APIs, so zero monthly subscription fees.
+- **Safety**: Anti-Blowup Protection (strict lot capping, min SL, daily drawdown limits).
+- **Dashboard**: Shows real-time PnL, Strategy Leaderboard, and exact concept used for each trade.
+- **Pricing**: 1M=$100, 3M=$200, 6M=$300, 1Y=$500.
+- **Payment**: USDT on TRC20 network.
+- **Risk**: No bot can guarantee 100% profit. It's a tool with ~55-65% win rate.
 
 RULES:
-- ONLY answer questions related to SuperBot, trading, MT5, payments, or installation.
-- If someone asks a completely unrelated question (like "who is the president" or "what is the weather"), politely say: "Main sirf SuperBot se jude sawalon ka jawab de sakta hoon."
-- Talk like a friendly human (English or Hinglish, depending on the user).
-- Never guarantee profits. Always remind them that trading involves risk.
-- Keep answers short and helpful.
+1. You must understand and reply in BOTH Hindi (Hinglish) and English. Match the user's language.
+2. Be extremely fast, helpful, and persuasive like a top salesman.
+3. If they ask "how to buy", tell them to select a plan below, pay via TRC20, and send the screenshot.
+4. If they ask any unrelated question (e.g., weather, politics), politely say: "Main sirf SuperBot aur trading se judi jaankari de sakta hoon."
+5. Keep answers short and crisp. Do not write massive essays.
 """
 
 # ═══════════════════════════════════════════════════════
-# USER HANDLERS
+# HANDLERS
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
     args = message.text.split()
 
+    # Agar website se aaya hai
     if len(args) > 1:
         plan_code = args[1]
         plan_name = PLAN_NAMES.get(plan_code, "Unknown Plan")
@@ -81,11 +86,13 @@ def send_welcome(message):
         
         bot.send_message(
             chat_id, 
-            f"👋 <b>Welcome!</b>\n\nAapne <b>{plan_name}</b> select kiya hai.\n\n"
-            f"Kripya payment karein aur <b>Screenshot</b> bhejein. Agar koi sawal ho toh yahin poochhein!",
+            f"👋 <b>Welcome to SuperBot!</b>\n\nAapne <b>{plan_name}</b> select kiya hai.\n\n"
+            f"Kripya payment karein aur <b>Screenshot</b> bhejein.\n"
+            f"Koi bhi sawal ho toh yahin poochhein, main AI hoon!",
             reply_markup=markup, parse_mode="HTML"
         )
     else:
+        # Agar direct aaya hai
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
             InlineKeyboardButton("1 Month ($100)", callback_data="plan_100"),
@@ -95,8 +102,14 @@ def send_welcome(message):
         )
         bot.send_message(
             chat_id, 
-            "👋 <b>Welcome to SuperBot!</b>\n\n"
-            "Plan select karein ya apna koi bhi sawal poochhein (Main AI hoon, aapki puri madad karunga!):", 
+            "👋 <b>Hello! Main SuperBot ka AI Assistant hoon.</b>\n\n"
+            "Ye ek fully automated MT5 bot hai jo Gold & Euro trade karta hai.\n\n"
+            "<b>Plans:</b>\n"
+            "1 Month - $100\n"
+            "3 Months - $200\n"
+            "6 Months - $300\n"
+            "1 Year - $500\n\n"
+            "Neeche se plan select karein. Ya agar aapke koi sawal hain (Jaise: Kaise kaam karta hai? Safe hai? Payment kaise karein?), toh kripya yahan type karein, main turant jawab dunga!", 
             reply_markup=markup, parse_mode="HTML"
         )
 
@@ -112,7 +125,8 @@ def handle_callback(call):
             f"🪙 Coin: <b>USDT</b>\n"
             f"🌐 Network: <b>TRC20</b>\n"
             f"👛 Address:\n<code>{TRC20_WALLET}</code>\n\n"
-            f"⚠️ Sirf TRC20 par payment karein.\nPayment ke baad <b>Screenshot</b> bhejein!",
+            f"⚠️ <b>Note:</b> Sirf TRC20 par payment karein.\n"
+            f"Payment ke baad <b>Screenshot</b> yahan bhejein!",
             parse_mode="HTML"
         )
         
@@ -126,7 +140,7 @@ def handle_callback(call):
         
         bot.edit_message_text(
             chat_id=chat_id, message_id=call.message.message_id,
-            text=f"✅ Aapne <b>{plan_name}</b> select kiya hai.\n\nScreenshot bhejein.",
+            text=f"✅ Aapne <b>{plan_name}</b> select kiya hai.\n\nKripya payment karein aur screenshot bhejein.",
             reply_markup=markup, parse_mode="HTML"
         )
 
@@ -135,14 +149,15 @@ def handle_proof(message):
     chat_id = message.chat.id
     
     if chat_id not in user_plan:
-        bot.reply_to(message, "⚠️ Kripya pehle /start karke plan select karein!")
+        bot.reply_to(message, "⚠️ Kripya pehle plan select karein (/start dabayein)!")
         return
 
     plan_name = user_plan[chat_id]
     username = message.from_user.username or "No Username"
     
-    bot.reply_to(message, "⏳ <b>Proof Received!</b>\n\nAdmin verify kar raha hai. Key mil jayegi.", parse_mode="HTML")
+    bot.reply_to(message, "⏳ <b>Proof Received!</b>\n\nAdmin verify kar raha hai. Aapko jaldi hi key mil jayegi.", parse_mode="HTML")
     
+    # Admin ko alert
     alert_text = (
         f"🚨 <b>NEW PAYMENT PROOF</b>\n\n"
         f"👤 User: @{username}\n"
@@ -157,7 +172,7 @@ def handle_proof(message):
     admin_msg_map[forwarded.message_id] = chat_id
 
 # ═══════════════════════════════════════════════════════
-# ADMIN REPLY HANDLER (Auto Delivery)
+# 👑 ADMIN HANDLER (Aap sirf yahan OK KEY likhenge)
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(func=lambda message: message.chat.id == ADMIN_ID and message.reply_to_message, content_types=['text'])
 def handle_admin_reply(message):
@@ -169,18 +184,20 @@ def handle_admin_reply(message):
         
         if user_chat_id:
             try:
+                # Customer ko key send karein
                 bot.send_message(
                     user_chat_id,
                     f"🎉 <b>Payment Verified Successfully!</b>\n\n"
                     f"🔑 <b>Your License Key:</b>\n<code>{license_key}</code>\n\n"
-                    f"✅ <b>How to Activate:</b>\n"
-                    f"1. Open the bot software.\n"
+                    f"✅ <b>Activation Process:</b>\n"
+                    f"1. Open SuperBot software on your PC.\n"
                     f"2. Enter this key when prompted.\n"
-                    f"3. Enjoy automated trading!\n\n"
+                    f"3. Bot will activate and start trading!\n\n"
                     f"Agar koi dikkat aaye, toh yahin message karein.",
                     parse_mode="HTML"
                 )
                 bot.reply_to(message, f"✅ Key successfully sent to User ID: {user_chat_id}!")
+                active_users.add(user_chat_id)
             except Exception as e:
                 bot.reply_to(message, f"❌ Error sending to user: {e}")
             
@@ -192,7 +209,7 @@ def handle_admin_reply(message):
         bot.reply_to(message, "⚠️ Invalid format. Please reply with: OK YOUR_KEY")
 
 # ═══════════════════════════════════════════════════════
-# 🆕 AI CHAT HANDLER (Answers all customer questions)
+# 🤖 AI CHAT HANDLER (Customer ke saare sawalon ka jawab)
 # ═══════════════════════════════════════════════════════
 @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/') and message.chat.id != ADMIN_ID)
 def handle_ai_chat(message):
@@ -200,23 +217,23 @@ def handle_ai_chat(message):
     user_text = message.text
 
     if not ai_client:
-        bot.reply_to(message, "⚠️ AI service is down. Kripya /start dabayein.")
+        bot.reply_to(message, "⚠️ AI service temporarily down. Kripya /start dabayein.")
         return
 
     bot.send_chat_action(chat_id, 'typing')
     try:
         response = ai_client.chat.completions.create(
-            model="llama-3.1-8b-instant", # Fast AI model
+            model="llama-3.3-70b-versatile", # Sabse fast aur smart model
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_text}
             ],
-            temperature=0.5, max_tokens=250
+            temperature=0.6, max_tokens=300
         )
         bot.reply_to(message, response.choices[0].message.content)
     except Exception as e:
         print(f"AI Error: {e}")
-        bot.reply_to(message, "⚠️ Sorry, main thoda busy hoon. Kripya thodi der baad poochhein ya /start dabayein.")
+        bot.reply_to(message, "⚠️ Sorry, main thoda busy hoon. Kripya /start dabayein.")
 
 # ═══════════════════════════════════════════════════════
 # SERVER START
@@ -229,7 +246,7 @@ def run_bot():
     while True:
         try:
             bot.infinity_polling(skip_pending=True, timeout=20, long_polling_timeout=10)
-        except Exception as e:
+        except Exception:
             time.sleep(5)
 
 if __name__ == '__main__':
